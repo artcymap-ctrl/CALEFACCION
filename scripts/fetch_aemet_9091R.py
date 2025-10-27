@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import csv, os, sys
+import csv, os, sys, re
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -36,27 +36,26 @@ def _parse_float_celsius(s: str):
     except ValueError:
         return None
 
-def _pick_index(headers, *candidates):
+def _is_temp_header(h: str) -> bool:
     """
-    Devuelve el índice de la cabecera que contenga TODOS los fragmentos de `candidates`
-    (búsqueda case-insensitive). Ej: _pick_index(H, "temperatura", "ºc")
+    Detecta cabeceras tipo:
+      - 'Temperatura (ºC)'
+      - 'Temp. (°C)'
+      - variantes con º/°, con o sin paréntesis/puntos
     """
-    H = [h.lower() for h in headers]
-    for i, h in enumerate(H):
-        if all(frag.lower() in h for frag in candidates):
-            return i
-    return -1
+    raw = _clean_text(h).lower()
+    # Normalizamos símbolos y puntuación para ser tolerantes
+    norm = raw.replace("º", "°")
+    norm = re.sub(r"[\.\(\)\[\],%/-]+", " ", norm)  # quita puntuación común
+    norm = re.sub(r"\s+", " ", norm).strip()
+    # Reglas: contiene 'temp' o 'temperatura' Y hace referencia a 'c' o '°c'
+    has_temp_word = ("temp" in norm) or ("temperatura" in norm)
+    has_c_unit = ("°c" in raw) or ("ºc" in raw) or re.search(r"\bc\b", norm) is not None
+    return has_temp_word and has_c_unit
 
 
 # ---------- Parser robusto por cabeceras ----------
 def parse_aemet_html_last24(html: str):
-    """
-    Lee la tabla HTML de AEMET 'últimos datos' y devuelve lista de tuplas:
-      [(ts_utc, temp_c), ...]
-    La detección es por cabeceras:
-      - Fecha y hora oficial
-      - Temperatura (ºC)
-    """
     soup = BeautifulSoup(html, "html.parser")
 
     table = soup.select_one("table.tabla_datos, table#table, table")
@@ -71,8 +70,15 @@ def parse_aemet_html_last24(html: str):
     if not headers:
         raise RuntimeError("No se pudieron leer cabeceras de la tabla")
 
-    idx_fecha = _pick_index(headers, "fecha", "hora")
-    idx_temp  = _pick_index(headers, "temperatura", "ºc")
+    # índices por inspección de cabeceras
+    idx_fecha = -1
+    idx_temp = -1
+    for i, h in enumerate(headers):
+        hlow = _clean_text(h).lower()
+        if idx_fecha < 0 and ("fecha" in hlow and "hora" in hlow):
+            idx_fecha = i
+        if idx_temp < 0 and _is_temp_header(h):
+            idx_temp = i
 
     if idx_fecha < 0:
         raise RuntimeError(f"No encontré la columna de fecha/hora. Cabeceras: {headers}")
@@ -89,7 +95,7 @@ def parse_aemet_html_last24(html: str):
         fecha_txt = _clean_text(tds[idx_fecha].get_text())
         temp_txt  = _clean_text(tds[idx_temp ].get_text())
 
-        # AEMET usa formato "dd/mm/YYYY HH:MM" (a veces con " h" al final)
+        # Formato habitual AEMET: "dd/mm/YYYY HH:MM" (a veces con " h")
         try:
             dt_local = datetime.strptime(fecha_txt, "%d/%m/%Y %H:%M").replace(tzinfo=TZ_LOCAL)
         except ValueError:
