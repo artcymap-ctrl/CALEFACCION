@@ -33,24 +33,110 @@ def try_csv(html: str):
     return parse_csv(text)
 
 def parse_csv(text: str):
-    f = io.StringIO(text); sample = f.read(2000); f.seek(0)
+    """
+    Lee el CSV de AEMET y selecciona de forma estricta:
+    - Fecha + Hora (si existen por separado) o bien un campo combinado.
+    - Temperatura (ºC) del aire (no tmin, tmax, ni temperatura de suelo ts).
+    """
+    f = io.StringIO(text)
+    sample = f.read(4000); f.seek(0)
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=";,\t")
     except Exception:
-        dialect = csv.excel; dialect.delimiter = ';'
+        dialect = csv.excel
+        dialect.delimiter = ';'
+
     rd = csv.reader(f, dialect)
     headers = next(rd, [])
-    hlow = [h.strip().lower() for h in headers]
-    i_fecha = next((i for i,h in enumerate(hlow) if "fecha" in h or "hora" in h), None)
-    i_temp  = next((i for i,h in enumerate(hlow) if "temperatura" in h or "ºc" in h or h=="t"), None)
-    out=[]
+    # normalizamos encabezados
+    norm = [re.sub(r"\s+", " ", h.strip().lower()) for h in headers]
+
+    # --- localizar fecha/hora ---
+    # candidatos razonables en AEMET: "fecha", "hora", "fecha (hora local)", etc.
+    idx_fecha = None
+    idx_hora  = None
+    idx_dt_combinado = None
+
+    for i, h in enumerate(norm):
+        if "fecha" in h and "hora" in h:
+            idx_dt_combinado = i
+            break
+
+    if idx_dt_combinado is None:
+        for i, h in enumerate(norm):
+            if "fecha" in h:
+                idx_fecha = i; break
+        for i, h in enumerate(norm):
+            if "hora" in h:
+                idx_hora = i; break
+
+    # --- localizar temperatura del aire ---
+    # reglas: debe contener "temperatura" y, opcionalmente, "ºc"
+    # se excluyen expresamente máximas/mínimas/suelo
+    bad_tokens = ("máx", "max", "mín", "min", "suelo", "ts")
+    def is_temp_col(h):
+        if "temperatura" not in h:
+            return False
+        if any(bt in h for bt in bad_tokens):
+            return False
+        return True
+
+    temp_idx = None
+    for i, h in enumerate(norm):
+        if is_temp_col(h):
+            temp_idx = i
+            break
+
+    # fallback muy conservador: si no se encontró nada, intenta "ºc" pero sin máx/mín/ts
+    if temp_idx is None:
+        for i, h in enumerate(norm):
+            if "ºc" in h and not any(bt in h for bt in bad_tokens):
+                temp_idx = i
+                break
+
+    if temp_idx is None:
+        print(f"WARN: no pude localizar columna de temperatura. Encabezados: {headers}")
+        return []
+
+    print(f"INFO: columnas elegidas → temp='{headers[temp_idx]}' ; "
+          f"{'datetime='+headers[idx_dt_combinado] if idx_dt_combinado is not None else f'fecha={headers[idx_fecha]} hora={headers[idx_hora]}'}")
+
+    out = []
     for row in rd:
-        if not row: continue
-        ds = row[i_fecha].strip()
-        ts_loc = parse_dt_es(ds)
-        temp = to_float(row[i_temp])
-        if temp is None: continue
-        out.append((align_hour_utc(ts_loc), temp))
+        if not row:
+            continue
+        # temperatura
+        t = to_float(row[temp_idx] if temp_idx < len(row) else None)
+        if t is None:
+            continue
+
+        # datetime local
+        try:
+            if idx_dt_combinado is not None:
+                ds = str(row[idx_dt_combinado]).strip()
+            else:
+                if idx_fecha is None or idx_hora is None:
+                    # último recurso: primer campo que parezca fecha+hora
+                    ds = " ".join(row[:2])
+                else:
+                    ds = f"{str(row[idx_fecha]).strip()} {str(row[idx_hora]).strip()}"
+            ts_loc = parse_dt_es(ds)
+        except Exception:
+            # no descartes toda la fila si no encaja el formato exacto; intenta variantes
+            ok = False
+            for fmt in ("%d/%m/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%Y-%m-%d %H:%M"):
+                try:
+                    d = datetime.strptime(ds, fmt)
+                    ts_loc = d.replace(tzinfo=TZ_LOCAL)
+                    ok = True
+                    break
+                except Exception:
+                    pass
+            if not ok:
+                continue
+
+        out.append((align_hour_utc(ts_loc), t))
+
     return out
 
 def parse_table(html: str):
