@@ -20,20 +20,66 @@ def fetch_html():
     return r.text
 
 def try_csv(html: str):
+    """Intenta descargar y parsear el CSV desde el enlace de la página AEMET."""
     soup = BeautifulSoup(html, "html.parser")
     a = soup.find("a", href=re.compile(r"\.csv(\?|$)", re.I))
-    if not a: return None
+    if not a:
+        return None
+
     href = a["href"]
-    if href.startswith("/"): href = "https://www.aemet.es"+href
-    r = requests.get(href, timeout=TIMEOUT, headers=HEADERS); r.raise_for_status()
-    for enc in ("utf-8","latin-1","cp1252"):
+    if href.startswith("/"):
+        href = "https://www.aemet.es" + href
+
+    r = requests.get(href, timeout=TIMEOUT, headers=HEADERS)
+    r.raise_for_status()
+
+    # intentamos leer con varios encodings
+    for enc in ("utf-8", "latin-1", "cp1252"):
         try:
             text = r.content.decode(enc)
             break
         except UnicodeDecodeError:
             text = None
-    if text is None: text = r.text
-    return parse_csv(text)
+    if text is None:
+        text = r.text
+
+    # --- parsear CSV directamente ---
+    f = io.StringIO(text)
+    rd = csv.reader(f, delimiter=';')
+    headers = next(rd, [])
+    norm = [h.strip().lower() for h in headers]
+
+    # buscar columna de temperatura real
+    idx_temp = None
+    for i, h in enumerate(norm):
+        if "temperatura" in h and "ºc" in h and not any(x in h for x in ("máx", "mín", "suelo", "ts")):
+            idx_temp = i
+            break
+
+    # buscar fecha y hora
+    idx_fecha = next((i for i,h in enumerate(norm) if "fecha" in h), None)
+    idx_hora  = next((i for i,h in enumerate(norm) if "hora" in h), None)
+
+    if idx_temp is None or idx_fecha is None or idx_hora is None:
+        # si no encontramos columnas adecuadas, volveremos al parser HTML
+        print("WARN: CSV directo no contiene 'Temperatura (ºC)'. Se usará el scraping HTML.")
+        return None
+
+    out = []
+    for row in rd:
+        try:
+            ds = f"{row[idx_fecha]} {row[idx_hora]}"
+            temp = to_float(row[idx_temp])
+            if temp is None:
+                continue
+            ts_loc = parse_dt_es(ds)
+            out.append((align_hour_utc(ts_loc), temp))
+        except Exception:
+            continue
+
+    print(f"INFO: CSV directo con columna '{headers[idx_temp]}' ({len(out)} registros)")
+    return out
+
 
 def parse_csv(text: str):
     f = io.StringIO(text); sample = f.read(2000); f.seek(0)
