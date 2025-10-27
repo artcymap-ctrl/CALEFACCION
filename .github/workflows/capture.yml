@@ -1,0 +1,37 @@
+name: Capture AEMET 9091R (últimas 24h)
+
+on:
+  schedule:
+    - cron: '10 4 * * *'   # 04:10 UTC
+    - cron: '10 5 * * *'   # 05:10 UTC (cubre cambio horario)
+  workflow_dispatch: {}     # permitir lanzarlo manualmente
+
+permissions:
+  contents: write  # para poder commitear el CSV acumulado
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4
+
+      - name: Fetch last-24h and update CSV
+        run: |
+          python scripts/fetch_aemet_9091R.py
+
+      - name: Commit CSV changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(data): update 9091R last-24h"
+          file_pattern: data/9091R_temp_hourly.csv
