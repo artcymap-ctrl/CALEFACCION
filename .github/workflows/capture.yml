@@ -29,9 +29,14 @@ jobs:
       - name: Fetch last-24h and update CSV
         run: |
           python scripts/fetch_aemet_9091R.py
+      - name: Update history archive
+        run: |
+          python scripts/update_archive.py
 
       - name: Commit CSV changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "chore(data): update 9091R last-24h"
-          file_pattern: data/9091R_temp_hourly.csv
+          file_pattern: 
+            data/9091R_temp_hourly.csv
+            data/9091R_temp_history.csv
