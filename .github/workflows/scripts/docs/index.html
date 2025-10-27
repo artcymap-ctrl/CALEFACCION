@@ -1,0 +1,30 @@
+<!doctype html><html lang="es"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>9091R • Histórico temperatura</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>body{background:#0b1220;color:#e7eef7;font-family:system-ui;margin:0}
+.wrap{max-width:1100px;margin:20px auto;padding:0 12px}
+.card{background:#121a2b;border:1px solid #1c2740;border-radius:12px;padding:12px}
+label{font-size:.9rem;color:#b8c7db}.row{display:flex;gap:10px;align-items:center;margin:10px 0}
+input,button{padding:6px;border-radius:8px;border:1px solid #22314e;background:#0e1628;color:#e7eef7}
+canvas{height:52vh;max-height:540px;background:#0b1324;border:1px solid #1c2740;border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:.85rem}th,td{border-bottom:1px solid #1c2740;padding:4px 6px;text-align:center}</style>
+<div class="wrap"><h2>9091R (Vitoria-Foronda) • Temperatura hora a hora</h2>
+<div class="card"><div class="row"><label>Rango:</label>
+<input id="fi" type="date"><span>→</span><input id="ff" type="date"><button id="btn">Aplicar</button></div>
+<canvas id="ch"></canvas><p id="msg"></p>
+<details><summary>Tabla (primeras 200 filas)</summary><div id="tbl"></div></details></div></div>
+<script>
+const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid'; let chart;
+function parseCSV(t){const l=t.trim().split(/\r?\n/);const h=l.shift().split(',');const idx=Object.fromEntries(h.map((k,i)=>[k,i]));return l.map(s=>{const c=s.split(',');return{date_local:c[idx.date_local],time_local:c[idx.time_local],dt_utc:new Date(c[idx.datetime_utc]),temp_c:parseFloat(c[idx.temp_c])};});}
+function draw(rows){const ctx=document.getElementById('ch').getContext('2d'); if(chart) chart.destroy();
+const labels=rows.map(r=>r.dt_utc.toLocaleString('es-ES',{timeZone:tz})); const data=rows.map(r=>r.temp_c);
+chart=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'ºC',data,spanGaps:true,tension:.2,pointRadius:0}]},options:{responsive:true,maintainAspectRatio:false,scales:{y:{title:{display:true,text:'ºC'}}}}});}
+function tbl(rows){const head='<tr><th>Fecha</th><th>Hora</th><th>UTC</th><th>ºC</th></tr>';const body=rows.slice(0,200).map(r=>`<tr><td>${r.date_local}</td><td>${r.time_local}</td><td>${r.dt_utc.toISOString().replace('.000Z','Z')}</td><td>${r.temp_c.toFixed(1)}</td></tr>`).join('');document.getElementById('tbl').innerHTML=`<table><thead>${head}</thead><tbody>${body}</tbody></table>`;}
+async function load(){const m=s=>document.getElementById('msg').textContent=s||''; m('Descargando CSV…'); const r=await fetch('../data/9091R_temp_hourly.csv'); if(!r.ok){m('Aún no hay CSV. Ejecuta el workflow en Actions.'); return;} const text=await r.text(); const all=parseCSV(text);
+const today=new Date(); const past=new Date(today.getTime()-30*24*3600*1000);
+document.getElementById('fi').value=(all[0]?.date_local)||past.toISOString().slice(0,10);
+document.getElementById('ff').value=today.toISOString().slice(0,10); apply(all);}
+function apply(all){const fi=new Date(document.getElementById('fi').value+'T00:00:00Z'); const ff=new Date(document.getElementById('ff').value+'T23:59:59Z'); const rows=all.filter(r=>r.dt_utc>=fi && r.dt_utc<=ff); document.getElementById('msg').textContent=`Filtradas ${rows.length} horas`; draw(rows); tbl(rows);}
+document.getElementById('btn').addEventListener('click', async()=>{const r=await fetch('../data/9091R_temp_hourly.csv'); const text=await r.text(); apply(parseCSV(text));}); load();
+</script>
