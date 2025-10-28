@@ -40,5 +40,5 @@ jobs:
         with:
           commit_message: "chore(data): update 9091R last-24h"
           file_pattern: 
-            data/9091R_temp_hourly.csv
-            data/9091R_temp_history.csv
+            docs/data/9091R_temp_hourly.csv
+            docs/data/9091R_temp_history.csv
