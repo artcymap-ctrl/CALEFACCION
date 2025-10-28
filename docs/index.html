@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Temperaturas 9091R • Histórico</title>
+  <style>
+    body{margin:0;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;background:#0b1220;color:#e7eef7}
+    header{padding:16px 20px;border-bottom:1px solid #1c2740;background:linear-gradient(180deg,#0d1628 0%, #0b1220 60%)}
+    h1{margin:0;font-size:1.1rem}
+    main{padding:16px;max-width:1100px;margin:auto}
+    .card{background:#121a2b;border:1px solid #1c2740;border-radius:12px;padding:12px}
+    #chart{height:58vh;min-height:360px}
+    a{color:#8ac8ff}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Temperaturas horarias • Vitoria-Gasteiz (Foronda 9091R)</h1>
+    <div style="color:#9db0c6;font-size:.9rem">Fuente: AEMET (captura diaria automática)</div>
+  </header>
+  <main>
+    <div class="card">
+      <canvas id="chart"></canvas>
+      <div id="meta" style="margin-top:8px;color:#9db0c6;font-size:.9rem"></div>
+    </div>
+    <p style="margin-top:14px;color:#9db0c6;font-size:.9rem">
+      CSV histórico: <a id="csvLink" href="#" target="_blank" rel="noopener">data/9091R_temp_history.csv</a>
+    </p>
+  </main>
+
+<script>
+(async function(){
+  // ⚠️ Si el repo es público y estás usando Pages desde /docs en main,
+  // leer por raw.githubusercontent es lo más sencillo:
+  const USER = "artcymap-ctrl";
+  const REPO = "CALEFACCION";
+  const CSV_URL = `https://raw.githubusercontent.com/${USER}/${REPO}/main/data/9091R_temp_history.csv`;
+
+  // Pequeño parser CSV (no dependemos de librerías)
+  async function fetchCSV(url){
+    const r = await fetch(url + "?t=" + Date.now()); // cache-busting
+    if(!r.ok) throw new Error("No pude descargar CSV: " + r.status);
+    const text = await r.text();
+    const [head, ...lines] = text.trim().split(/\r?\n/);
+    const cols = head.split(",");
+    const out = [];
+    for(const line of lines){
+      if(!line.trim()) continue;
+      const parts = line.split(",");
+      const row = {};
+      cols.forEach((c, i)=> row[c] = parts[i] ?? "");
+      out.push(row);
+    }
+    return out;
+  }
+
+  function parseRows(rows){
+    // Espera cabeceras: date_local,time_local,datetime_utc,temp_c,source
+    const xs = [];
+    const ys = [];
+    for(const r of rows){
+      if(!r.datetime_utc) continue;
+      const t = new Date(r.datetime_utc);
+      const v = parseFloat(r.temp_c);
+      if(isFinite(t.getTime()) && !Number.isNaN(v)){
+        xs.push(t);
+        ys.push(v);
+      }
+    }
+    return {xs, ys};
+  }
+
+  function draw(xs, ys){
+    const ctx = document.getElementById("chart").getContext("2d");
+    const min = Math.min(...ys), max = Math.max(...ys);
+    const span = Math.max(1e-6, max - min);
+    const pad = Math.max(0.5, Math.min(2.5, span*0.15));
+    const yMin = Math.floor((min - pad) * 10) / 10;
+    const yMax = Math.ceil((max + pad) * 10) / 10;
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: xs,
+        datasets: [{
+          label: 'ºC',
+          data: ys,
+          borderWidth: 2,
+          tension: 0.2,
+          pointRadius: 0,
+          spanGaps: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        scales: {
+          x: {
+            type: 'time',
+            adapters: { date: {} },
+            time: { unit: 'day', tooltipFormat: 'dd/MM/yyyy HH:mm' },
+            ticks: { color: '#a9c2de' },
+            grid: { color: 'rgba(255,255,255,0.07)' },
+            title: { display: true, text: 'Fecha y hora' }
+          },
+          y: {
+            suggestedMin: yMin,
+            suggestedMax: yMax,
+            ticks: { color: '#a9c2de' },
+            grid: { color: 'rgba(255,255,255,0.07)' },
+            title: { display: true, text: 'Temperatura (ºC)' }
+          }
+        },
+        plugins: {
+          legend: { labels: { color: '#cfe6ff' } },
+          tooltip: { mode: 'nearest', intersect: false }
+        }
+      }
+    });
+  }
+
+  try{
+    const rows = await fetchCSV(CSV_URL);
+    const {xs, ys} = parseRows(rows);
+    draw(xs, ys);
+    document.getElementById("csvLink").href = CSV_URL;
+    document.getElementById("csvLink").textContent = CSV_URL;
+    const meta = document.getElementById("meta");
+    meta.textContent = `Registros: ${ys.length}. Rango: ${xs.length ? xs[0].toISOString().slice(0,10) : '—'} → ${xs.length ? xs[xs.length-1].toISOString().slice(0,10) : '—'}.`;
+  }catch(e){
+    document.getElementById("meta").textContent = "Error cargando CSV: " + e.message;
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>
