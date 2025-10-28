@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Temperaturas horarias · Vitoria-Gasteiz (Foronda 9091R)</title>
 
-  <!-- Chart.js + Luxon time adapter -->
+  <!-- Chart.js + Luxon -->
   <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
@@ -101,9 +101,12 @@
       const iso = parts[idx.dt];
       const t   = Number(parts[idx.temp]);
       if(!isFinite(t)) continue;
-      const dt  = luxon.DateTime.fromISO(iso, { zone:'utc' });
-      if(!dt.isValid) continue;
-      rows.push({ x: dt.toJSDate(), y: t });
+
+      // Fechas: a milisegundos (número). Evita ambigüedad con zonas y objetos Date.
+      const dtUtc = luxon.DateTime.fromISO(iso, { zone:'utc' });
+      if(!dtUtc.isValid) continue;
+      const ms = dtUtc.toMillis();      // número Timestamp (UTC)
+      rows.push({ x: ms, y: t });
     }
     rows.sort((a,b)=>a.x-b.x);
 
@@ -125,22 +128,24 @@
     const yMin = rows.length ? Math.min(...rows.map(d=>d.y)) : 0;
     const yMax = rows.length ? Math.max(...rows.map(d=>d.y)) : 10;
 
-    // CLAVE: fijamos min/max del eje X a tus datos
-    const xMin = rows.length ? rows[0].x : undefined;
-    const xMax = rows.length ? rows[rows.length-1].x : undefined;
+    // Rango explícito del eje X en milisegundos
+    const xMin = rows[0].x;
+    const xMax = rows[rows.length-1].x;
 
     window.__chart = new Chart(ctx, {
       type: 'line',
       data: {
         datasets: [{
           label: 'Temperatura (ºC)',
-          data: rows,
+          data: rows,                    // {x: ms UTC, y: num}
           borderColor: '#77b7ff',
           backgroundColor: 'rgba(119,183,255,.25)',
           borderWidth: 2,
           pointRadius: 2,
           spanGaps: true,
-          tension: 0.25
+          tension: 0.25,
+          xAxisKey: 'x',
+          yAxisKey: 'y'
         }]
       },
       options: {
@@ -152,16 +157,15 @@
         scales: {
           x: {
             type: 'time',
-            adapters: { date: { zone: 'Europe/Madrid' } },   // para formateo
-            // min y max basados en tus datos
-            min: xMin,
+            adapters: { date: { zone: 'Europe/Madrid' } },
+            min: xMin,                   // en milisegundos
             max: xMax,
             time: {
               tooltipFormat: "dd/LL/yyyy HH:mm",
               displayFormats: { hour: "HH:mm" }
             },
             ticks: {
-              source: 'data',     // usa tus puntos como referencia
+              source: 'data',
               maxRotation: 0,
               autoSkip: true
             },
@@ -180,7 +184,8 @@
             callbacks:{
               title(items){
                 if(!items.length) return '';
-                const d = luxon.DateTime.fromJSDate(items[0].parsed.x, { zone:'Europe/Madrid' });
+                // items[0].parsed.x llega como ms (UTC)
+                const d = luxon.DateTime.fromMillis(items[0].parsed.x, { zone:'Europe/Madrid' });
                 return d.toFormat("dd/LL/yyyy HH:mm");
               },
               label(it){ return `Temperatura (ºC): ${it.parsed.y.toFixed(1)}`; }
@@ -203,7 +208,7 @@
       label = dtLoc.isValid ? dtLoc.toFormat("dd/LL/yyyy, HH:mm") : null;
     }
     if(!label && lastUtc){
-      const dtLoc = luxon.DateTime.fromJSDate(lastUtc).setZone('Europe/Madrid');
+      const dtLoc = luxon.DateTime.fromMillis(lastUtc, { zone:'Europe/Madrid' });
       label = dtLoc.toFormat("dd/LL/yyyy, HH:mm");
     }
     if(!label){
