@@ -2,162 +2,220 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Temperaturas horarias · Vitoria-Gasteiz (Foronda 9091R)</title>
 
-  <!-- Chart.js + adaptador date-fns -->
+  <!-- Chart.js + Luxon time adapter -->
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/date-fns@3.6.0/locale/es/index.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
 
   <style>
     :root{
-      --bg:#0b1220;--fg:#e7eef7;--mut:#a7b8cf;--card:#121a2b;
-      --accent:#4aa3ff;--ok:#27c93f;--err:#ff453a
+      --bg:#0b1220; --card:#121a2b; --fg:#e7eef7; --muted:#9db0c6;
+      --accent:#77b7ff; --ok:#27c93f; --warn:#ffbd2e; --err:#ff453a;
+      --chip:#0e223e; --chip-b:#224b7a;
     }
-    body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,Roboto,Arial}
-    header{padding:16px 20px;border-bottom:1px solid #1c2740;background:#0d1628}
-    h1{margin:0;font-size:1.15rem}
-    .sub{color:var(--mut);font-size:.9rem;margin-top:6px}
-    main{padding:16px;max-width:1200px;margin:0 auto}
-    .panel{background:var(--card);border:1px solid #1c2740;border-radius:14px;padding:12px}
-    a{color:#9dccff}
-    .row{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
-    #chartWrap{height:480px;margin-top:10px}
-    canvas{background:#0b1324;border-radius:8px;border:1px solid #1c2740;width:100%;height:100%}
-    .mut{color:var(--mut)} .ok{color:var(--ok)} .bad{color:var(--err)}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Helvetica,Arial}
+    header{padding:18px 18px 8px 18px}
+    h1{margin:0 0 4px 0;font-size:1.15rem}
+    .sub{color:var(--muted);font-size:.9rem}
+    .chip{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:6px 10px;border-radius:999px;background:var(--chip);
+      border:1px solid var(--chip-b);font-size:.82rem;color:#cfe3ff
+    }
+    .chip .dot{width:8px;height:8px;border-radius:50%;background:var(--ok)}
+    main{padding:12px}
+    .panel{background:var(--card);border:1px solid #1c2740;border-radius:14px;padding:12px;max-width:1400px;margin:0 auto}
+    .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+    .csvlink{color:#a9cfff;text-decoration:none}
+    .csvlink:hover{text-decoration:underline}
+    .right-muted{color:#a9c2de;font-size:.9rem}
+    canvas{background:#0b1324;border:1px solid #1c2740;border-radius:8px;width:100%;height:60vh;min-height:360px}
+    .footok{color:var(--ok);margin-top:6px}
+    @media (max-width: 640px){
+      canvas{height:48vh}
+    }
   </style>
 </head>
 <body>
-<header>
-  <h1>Temperaturas horarias · Vitoria-Gasteiz (Foronda 9091R)</h1>
-  <div class="sub">Fuente: AEMET · captura diaria automática · histórico incremental</div>
-</header>
+  <header>
+    <h1>Temperaturas horarias · Vitoria-Gasteiz (Foronda 9091R)</h1>
+    <div class="sub">Fuente: AEMET · captura diaria automática · histórico incremental</div>
+  </header>
 
-<main>
-  <section class="panel">
-    <div class="row">
-      <div>CSV histórico: <a id="csvLink" href="data/9091R_temp_history.csv">data/9091R_temp_history.csv</a></div>
-      <div class="mut">Último dato: <span id="updatedLbl">—</span></div>
-    </div>
-    <div id="chartWrap"><canvas id="chart"></canvas></div>
-    <div id="msg" class="mut"></div>
-  </section>
-</main>
+  <main>
+    <section class="panel">
+      <div class="row" style="margin-bottom:8px">
+        <div>
+          CSV histórico:
+          <a id="csvLink" class="csvlink" href="data/9091R_temp_history.csv" target="_blank" rel="noopener">data/9091R_temp_history.csv</a>
+        </div>
+        <div id="updateChip" class="chip" title="Última actualización detectada">
+          <span class="dot"></span>
+          <span id="updateText">Última actualización: …</span>
+        </div>
+      </div>
+
+      <canvas id="chart"></canvas>
+
+      <div id="okMsg" class="footok"></div>
+    </section>
+  </main>
 
 <script>
 (async function(){
-  const CSV_URL = "https://raw.githubusercontent.com/artcymap-ctrl/CALEFACCION/main/data/9091R_temp_history.csv";
-  const csvLink   = document.getElementById('csvLink');
-  const updatedEl = document.getElementById('updatedLbl');
-  const msg       = document.getElementById('msg');
+  // Rutas de datos (relativas al sitio)
+  const CSV_URL  = 'data/9091R_temp_history.csv';
+  const JSON_URL = 'data/last_update.json';
 
-  const bust = `?_t=${Date.now()}`;
-  csvLink.href = CSV_URL;
+  // DOM
+  const csvLinkEl   = document.getElementById('csvLink');
+  const updateText  = document.getElementById('updateText');
+  const okMsg       = document.getElementById('okMsg');
+  const ctx         = document.getElementById('chart').getContext('2d');
 
-  function setMsg(t,c='mut'){ msg.textContent=t; msg.className=c; }
+  // Helper: cache busting
+  const withBust = (url) => `${url}?t=${Date.now()}`;
 
-  async function fetchCSV(url){
-    const r=await fetch(url);
-    if(!r.ok) throw new Error("HTTP "+r.status);
-    return await r.text();
-  }
+  // 1) Carga CSV y parsea (headers: date_local,time_local,datetime_utc,temp_c,source)
+  async function loadCSV(url){
+    const res = await fetch(withBust(url));
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
 
-  function parseCSV(text){
-  const lines = text.trim().split(/\r?\n/);
-  if(lines.length < 2) return [];
-  const headers = lines[0].split(',');
-  const iDate = headers.indexOf('datetime_utc');
-  const iTemp = headers.indexOf('temp_c');
-  if(iDate === -1 || iTemp === -1) throw new Error("Cabeceras no válidas");
+    const lines = text.trim().split(/\r?\n/);
+    if(lines.length<=1) return { rows:[], lastUtc:null };
 
-  const pts = [];
-  for(let i=1;i<lines.length;i++){
-    const cols = lines[i].split(',');
-    const dateStr = cols[iDate]?.trim();
-    const tempStr = cols[iTemp]?.trim();
-    if(!dateStr || !tempStr) continue;
+    const header = lines[0].split(',');
+    const idx = {
+      dt:   header.indexOf('datetime_utc'),
+      temp: header.indexOf('temp_c')
+    };
+    if(idx.dt<0 || idx.temp<0) throw new Error('Cabeceras inesperadas en CSV');
 
-    // convertir a timestamp en milisegundos UTC
-    const d = new Date(dateStr);
-    if(isNaN(d)) continue;
-    const x = d.getTime();
-    const y = parseFloat(tempStr);
-    if(!isNaN(x) && !isNaN(y)) pts.push({x, y});
-  }
-  return pts;
-}
-
-  let points=[];
-  try{
-    setMsg("Cargando datos…");
-    const txt=await fetchCSV(CSV_URL+bust);
-    points=parseCSV(txt);
-    setMsg(`OK: ${points.length} registros.`,'ok');
-  }catch(e){
-    setMsg("Error cargando CSV: "+e.message,'bad');
-    return;
-  }
-
-  if(points.length===0){setMsg("Sin datos.","bad");return;}
-
-  points.sort((a,b)=>a.x-b.x);
-  const last=points.at(-1);
-  updatedEl.textContent=new Intl.DateTimeFormat('es-ES',{dateStyle:'short',timeStyle:'short'}).format(last.x);
-
-  // Escala Y razonable
-  const temps=points.map(p=>p.y);
-  const tMin=Math.min(...temps),tMax=Math.max(...temps);
-  const pad=Math.max(0.3,(tMax-tMin)*0.08);
-  const yMin=Math.floor((tMin-pad)*10)/10;
-  const yMax=Math.ceil((tMax+pad)*10)/10;
-  const step=(tMax-tMin)<=6?0.5:1;
-
-  const ctx=document.getElementById('chart').getContext('2d');
-  new Chart(ctx,{
-    type:'line',
-    data:{datasets:[{
-      label:'Temperatura (ºC)',
-      data:points,
-      borderColor:'#4aa3ff',
-      borderWidth:2,
-      pointRadius:1.5,
-      pointHitRadius:6,
-      tension:0.25,
-      spanGaps:true
-    }]},
-    options:{
-      animation:false,
-      normalized:true,
-      parsing:false,
-      responsive:true,
-      maintainAspectRatio:false,
-      scales:{
-        x:{
-          type:'time',
-          time:{
-            unit:'hour',
-            tooltipFormat:'dd/MM/yyyy HH:mm'
-          },
-          adapters:{ date:{ zone:'UTC' } }, // <=== CLAVE: fechas UTC válidas
-          ticks:{ color:'#a9c2de', source:'data', maxRotation:0 },
-          grid:{ color:'rgba(255,255,255,0.07)' },
-          title:{ display:true,text:'Fecha y hora'}
-        },
-        y:{
-          suggestedMin:yMin,suggestedMax:yMax,
-          ticks:{ stepSize:step, color:'#a9c2de' },
-          grid:{ color:'rgba(255,255,255,0.07)' },
-          title:{ display:true,text:'ºC'}
-        }
-      },
-      plugins:{
-        legend:{ labels:{ color:'#cfe6ff' } },
-        tooltip:{ intersect:false,mode:'index' },
-        decimation:{ enabled:false }
-      }
+    const rows = [];
+    for(let i=1;i<lines.length;i++){
+      const parts = lines[i].split(',');
+      if(parts.length<header.length) continue;
+      const iso = parts[idx.dt];
+      const t   = Number(parts[idx.temp]);
+      if(!isFinite(t)) continue;
+      const dt  = luxon.DateTime.fromISO(iso, { zone:'utc' });
+      if(!dt.isValid) continue;
+      rows.push({ x: dt.toJSDate(), y: t });
     }
-  });
+    rows.sort((a,b)=>a.x-b.x);
+
+    const lastUtc = rows.length ? rows[rows.length-1].x : null;
+    return { rows, lastUtc };
+  }
+
+  // 2) Intenta leer JSON con marca temporal
+  async function loadLastUpdateJSON(url){
+    try{
+      const r = await fetch(withBust(url));
+      if(!r.ok) return null;
+      const j = await r.json();
+      return j; // { updated_utc, updated_local, tz_local, rows_last_run? }
+    }catch(_){ return null; }
+  }
+
+  // 3) Dibuja la gráfica
+  function drawChart(rows){
+    if(window.__chart) window.__chart.destroy();
+
+    window.__chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        datasets: [{
+          label: 'Temperatura (ºC)',
+          data: rows,
+          borderWidth: 2,
+          pointRadius: 2,
+          spanGaps: true,
+          tension: 0.25
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        parsing: false,
+        scales: {
+          x: {
+            type: 'time',
+            adapters: { date: { zone: 'Europe/Madrid' } },
+            time: { tooltipFormat: "dd/LL/yyyy HH:mm", displayFormats: { hour: "HH:mm" } },
+            title: { display: true, text: 'Fecha y hora' },
+            ticks: { maxRotation: 0, autoSkip: true }
+          },
+          y: {
+            title: { display: true, text: 'ºC' },
+            suggestedMin: Math.min(...rows.map(d=>d.y), 0) - 1,
+            suggestedMax: Math.max(...rows.map(d=>d.y), 10) + 1
+          }
+        },
+        plugins: {
+          legend: { labels:{ color:'#cfe6ff' } },
+          tooltip: {
+            callbacks:{
+              title(items){
+                if(!items.length) return '';
+                const d = luxon.DateTime.fromJSDate(items[0].parsed.x, { zone:'Europe/Madrid' });
+                return d.toFormat("dd/LL/yyyy HH:mm");
+              },
+              label(it){ return `Temperatura (ºC): ${it.parsed.y.toFixed(1)}`; }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // 4) Flujo principal
+  try{
+    // Enlace visible con cache-busting
+    csvLinkEl.href = withBust(CSV_URL);
+
+    // Carga CSV
+    const { rows, lastUtc } = await loadCSV(CSV_URL);
+
+    // Carga JSON (si existe)
+    const meta = await loadLastUpdateJSON(JSON_URL);
+
+    // Determina “Última actualización” (orden de preferencia):
+    //   a) meta.updated_local (si existe)
+    //   b) última hora del CSV en horario local
+    //   c) document.lastModified (fallback extremo)
+    let label;
+    if(meta && meta.updated_local){
+      const dtLoc = luxon.DateTime.fromISO(meta.updated_local);
+      label = dtLoc.isValid ? dtLoc.toFormat("dd/LL/yyyy, HH:mm") : null;
+    }
+    if(!label && lastUtc){
+      const dtLoc = luxon.DateTime.fromJSDate(lastUtc).setZone('Europe/Madrid');
+      label = dtLoc.toFormat("dd/LL/yyyy, HH:mm");
+    }
+    if(!label){
+      const dt = luxon.DateTime.fromJSDate(new Date(document.lastModified)).setZone('Europe/Madrid');
+      label = dt.toFormat("dd/LL/yyyy, HH:mm");
+    }
+    updateText.textContent = `Última actualización: ${label}`;
+
+    // Pinta gráfico
+    if(rows.length){
+      drawChart(rows);
+      okMsg.textContent = `OK: ${rows.length} registros.`;
+    }else{
+      okMsg.textContent = 'No hay registros en el CSV.';
+      okMsg.style.color = 'var(--warn)';
+    }
+  }catch(err){
+    okMsg.textContent = `Error: ${err && err.message ? err.message : err}`;
+    okMsg.style.color = 'var(--err)';
+  }
 })();
 </script>
 </body>
