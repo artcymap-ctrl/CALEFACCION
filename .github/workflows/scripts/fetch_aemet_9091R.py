@@ -235,7 +235,10 @@ def main():
     if not rows: rows = parse_table(html)
     if not rows: raise SystemExit("No pude extraer filas.")
     write_merged(OUT, rows)
+    
+     # NUEVO: marca temporal para la web
     write_last_update(n_rows=len(rows))
+    
     print(f"OK: {len(rows)} registros. CSV -> {OUT}")
 
 if __name__ == "__main__":
