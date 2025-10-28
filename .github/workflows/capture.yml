@@ -2,9 +2,11 @@ name: Capture AEMET 9091R (últimas 24h)
 
 on:
   schedule:
-    - cron: '10 4 * * *'   # 04:10 UTC
-    - cron: '10 5 * * *'   # 05:10 UTC (cubre cambio horario)
-  workflow_dispatch: {}     # permitir lanzarlo manualmente
+    # 05:05 UTC (cubre verano, CEST = UTC+2 → 07:05 local)
+    - cron: '5 5 * * *'
+    # 06:05 UTC (cubre invierno, CET = UTC+1 → 07:05 local)
+    - cron: '5 6 * * *'
+  workflow_dispatch: {}
 
 permissions:
   contents: write  # para poder commitear el CSV acumulado
