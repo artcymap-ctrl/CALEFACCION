@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 
 # === Configuración ===
 URL = "https://www.aemet.es/es/eltiempo/observacion/ultimosdatos?k=pva&l=9091R&w=0&datos=det&x=&f=temperatura"
-OUT = "data/9091R_temp_hourly.csv"
+OUT = "docs/data/9091R_temp_hourly.csv"
 TZ_LOCAL = ZoneInfo("Europe/Madrid")
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; CYMAP-collector)"}
 TIMEOUT = 30
