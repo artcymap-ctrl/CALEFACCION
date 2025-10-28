@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import csv, os
 
-HOURLY = "data/9091R_temp_hourly.csv"
-ARCHIVE = "data/9091R_temp_history.csv"
+HOURLY = "docs/data/9091R_temp_hourly.csv"
+ARCHIVE = "docs/data/9091R_temp_history.csv"
 
 def read_csv(path):
     if not os.path.exists(path): return []
