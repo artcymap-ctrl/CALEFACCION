@@ -1,31 +1,24 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Temperaturas horarias · Vitoria-Gasteiz (Foronda 9091R)</title>
   <style>
-    :root{
-      --bg:#0b1220;--fg:#e7eef7;--muted:#9db0c6;--card:#121a2b;--accent:#4aa3ff
-    }
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--fg);
-         font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial}
-    header{padding:16px 20px;border-bottom:1px solid #1c2740;background:#0e1628}
-    h1{margin:0;font-size:1.1rem}
-    .sub{color:var(--muted);font-size:.85rem;margin-top:4px}
-    main{padding:14px}
-    .panel{background:var(--card);border:1px solid #1c2740;border-radius:14px;padding:12px}
-    #chartWrap{height:60vh;min-height:360px}
-    canvas{width:100%;height:100%}
-    a{color:var(--accent)}
-    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
-    .muted{color:var(--muted);font-size:.85rem}
-    .err{color:#ff6b6b}
+    :root{--bg:#0b1220;--fg:#e7eef7;--muted:#9db0c6;--card:#121a2b;--accent:#4aa3ff}
+    *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Arial}
+    header{padding:16px;border-bottom:1px solid #1c2740;background:linear-gradient(180deg,#0d1628 0%, #0b1220 60%)}
+    h1{font-size:1.05rem;margin:0 0 2px 0} .sub{color:var(--muted);font-size:.88rem}
+    main{padding:16px}
+    .card{background:var(--card);border:1px solid #1c2740;border-radius:12px;padding:14px}
+    .toprow{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+    a{color:#9fd1ff} .muted{color:var(--muted)} .err{color:#ff6b6b}
+    #chart{width:100%;height:58vh;min-height:340px;background:#0b1324;border:1px solid #1c2740;border-radius:8px}
   </style>
-  <!-- Chart.js + date adapter -->
+  <!-- Chart.js + date adapter (imprescindible para ejes temporales) -->
+  <script src="https://cdn.jsdelivr.net/npm/date-fns@2.30.0/dist/date-fns.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.umd.min.js"></script>
 </head>
 <body>
   <header>
@@ -34,139 +27,179 @@
   </header>
 
   <main>
-    <section class="panel">
-      <div class="row">
-        <div class="muted">CSV histórico: <a id="csvLink" href="#" target="_blank" rel="noopener">data/9091R_temp_history.csv</a></div>
-        <div class="muted" id="updatedLbl">Cargando…</div>
+    <div class="card">
+      <div class="toprow">
+        <div>CSV histórico: <a id="csvLink" href="#" target="_blank" rel="noopener">data/9091R_temp_history.csv</a></div>
+        <div class="muted">Último dato: <span id="updatedLbl">—</span></div>
       </div>
-      <div id="chartWrap"><canvas id="chart"></canvas></div>
-      <div class="muted" id="msg"></div>
-    </section>
+      <canvas id="chart"></canvas>
+      <div id="msg" class="muted" style="margin-top:8px"></div>
+    </div>
   </main>
 
 <script>
-(async function(){
+(async function () {
+  // 1) URL del CSV (raw en main)
   const CSV_URL = 'https://raw.githubusercontent.com/artcymap-ctrl/CALEFACCION/main/data/9091R_temp_history.csv';
-  const csvLink = document.getElementById('csvLink');
-  const updatedLbl = document.getElementById('updatedLbl');
-  const msg = document.getElementById('msg');
 
-  // Añade cache-busting y actualiza el link visible
-  const bust = Date.now();
-  const urlWithBust = CSV_URL + '?t=' + bust;
-  csvLink.href = urlWithBust;
+  const csvLink   = document.getElementById('csvLink');
+  const updatedLbl= document.getElementById('updatedLbl');
+  const msg       = document.getElementById('msg');
+  csvLink.href = CSV_URL;
+  csvLink.textContent = 'data/9091R_temp_history.csv';
 
-  // Utilidad: detectar delimitador (coma o punto y coma)
-  function detectDelimiter(headerLine){
-    // Si hay más ; que , asumimos ;
-    const commas = (headerLine.match(/,/g)||[]).length;
-    const semis  = (headerLine.match(/;/g)||[]).length;
-    return semis > commas ? ';' : ',';
-  }
-
-  // Parseo CSV simple y robusto para nuestro caso (líneas pequeñas)
-  function parseCSV(text){
-    // Normaliza saltos
-    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    const lines = text.split('\n');
-    if(lines.length === 0) return [];
-
-    const delimiter = detectDelimiter(lines[0]);
-    const headers = lines[0].split(delimiter).map(h => h.trim().toLowerCase());
-
-    // Índices de columnas que nos interesan (acepta nombres alternativos)
-    const idxDatetime = ['datetime_utc','time_utc','datetime','fecha_hora_utc'].map(n => headers.indexOf(n)).find(i => i>=0);
-    const idxTemp     = ['temp_c','temperatura (ºc)','temperatura','ta','t'].map(n => headers.indexOf(n)).find(i => i>=0);
-
-    if(idxDatetime == null || idxDatetime < 0){
-      throw new Error('No encuentro columna de fecha/tiempo (datetime_utc). Cabeceras: ' + headers.join(', '));
-    }
-    if(idxTemp == null || idxTemp < 0){
-      throw new Error('No encuentro columna de temperatura (temp_c o equivalente). Cabeceras: ' + headers.join(', '));
-    }
-
+  // Utilidad: parseo CSV robusto (simple y suficiente)
+  function parseCSV(text) {
+    const lines = text.trim().split(/\r?\n/);
+    if (!lines.length) return [];
+    const headers = lines[0].split(',').map(h => h.trim());
     const rows = [];
-    for(let i=1;i<lines.length;i++){
-      const line = lines[i].trim();
-      if(!line) continue;
-      const parts = line.split(delimiter);
-      // seguridad: si el CSV tuviera comas dentro, este parser simple no las manejaría.
-      // Para nuestros ficheros de AEMET, no se usan comas en campos, así que es seguro.
-
-      const dtRaw = (parts[idxDatetime]||'').trim();
-      const tRaw  = (parts[idxTemp]||'').trim();
-
-      // Normaliza número (coma decimal -> punto)
-      const t = parseFloat(tRaw.replace(',', '.'));
-      // Chart.js con adapter date-fns acepta ISO (Z o +00:00). Nuestro CSV trae ISO Z.
-      const d = new Date(dtRaw);
-
-      if (!isNaN(d.getTime()) && !isNaN(t)) {
-        rows.push({ x: d.toISOString(), y: t });
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split(',');
+      if (parts.length !== headers.length) continue;
+      const o = {};
+      for (let j = 0; j < headers.length; j++) {
+        o[headers[j]] = parts[j].trim();
       }
+      rows.push(o);
     }
-    return rows;
+    return { headers, rows };
   }
 
-  // Descarga CSV
-  let data = [];
-  try{
-    const r = await fetch(urlWithBust, { cache: 'no-store' });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const text = await r.text();
-    data = parseCSV(text);
+  // Localiza nombres de columna de forma flexible
+  function pickColumns(headers) {
+    const h = headers.map(x => x.toLowerCase());
+    const find = (...cands) => {
+      for (const c of cands) {
+        const idx = h.indexOf(c.toLowerCase());
+        if (idx !== -1) return headers[idx];
+      }
+      return null;
+    };
+    const colDT  = find('datetime_utc','time_utc','datetime','fecha_hora_utc','time_iso');
+    const colT   = find('temp_c','ta','temperatura (ºc)','temperatura','t');
+    const colDL  = find('date_local','fecha_local','fecha');
+    const colTL  = find('time_local','hora_local','hora');
+    return { colDT, colT, colDL, colTL };
+  }
 
-    if(data.length === 0) throw new Error('CSV vacío o no parseable.');
+  // Intenta crear Date a partir de distintas formas
+  function parseWhen(row, cols) {
+    if (cols.colDT && row[cols.colDT]) {
+      const d = new Date(row[cols.colDT]);      // ISO UTC del CSV
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    if (cols.colDL && cols.colTL && row[cols.colDL] && row[cols.colTL]) {
+      // Asumimos que date_local+time_local están en hora local (Europe/Madrid)
+      // Construimos como local. Nota: no ajustamos manualmente DST aquí;
+      // para la gráfica es suficiente trabajar en "hora local" del navegador.
+      const s = row[cols.colDL] + ' ' + row[cols.colTL];
+      const d = new Date(s);
+      if (!Number.isNaN(d.getTime())) return d;
+    }
+    return null;
+  }
 
-    // Muestra “última fecha” del histórico
-    const maxX = data.reduce((acc, p) => Math.max(acc, new Date(p.x).getTime()), 0);
-    const last = new Date(maxX);
-    updatedLbl.textContent = 'Último dato: ' + last.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' });
-
-  }catch(e){
-    msg.innerHTML = '<span class="err">Error cargando CSV: '+ (e && e.message ? e.message : e) +'</span>';
-    updatedLbl.textContent = '—';
+  // 2) Descarga
+  let text;
+  try {
+    const r = await fetch(CSV_URL, { cache: 'no-store' });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    text = await r.text();
+  } catch (e) {
+    msg.className = 'err';
+    msg.textContent = 'Error cargando CSV: ' + (e && e.message ? e.message : e);
     return;
   }
 
-  // Grafica
+  // 3) Parseo
+  const parsed = parseCSV(text);
+  if (!parsed.rows.length) {
+    msg.className = 'err';
+    msg.textContent = 'CSV vacío o sin filas de datos.';
+    return;
+  }
+  const cols = pickColumns(parsed.headers);
+  if (!cols.colT || (!cols.colDT && !(cols.colDL && cols.colTL))) {
+    msg.className = 'err';
+    msg.textContent = 'No encuentro columnas de fecha/hora y temperatura esperadas. Cabeceras: ' + parsed.headers.join(', ');
+    return;
+  }
+
+  // 4) Normaliza datos
+  const points = [];
+  for (const row of parsed.rows) {
+    const when = parseWhen(row, cols);
+    let t = row[cols.colT];
+    if (t == null || t === '') continue;
+    t = Number(String(t).replace(',', '.'));
+    if (!when || Number.isNaN(t)) continue;
+    points.push({ x: when, y: t });
+  }
+  points.sort((a,b)=>a.x - b.x);
+
+  if (!points.length) {
+    msg.className = 'err';
+    msg.textContent = 'No hay puntos válidos tras normalizar.';
+    return;
+  }
+
+  // 5) Último dato
+  const last = points[points.length-1];
+  updatedLbl.textContent = last.x.toLocaleString('es-ES');
+
+  // 6) Escalas sugeridas
+  const ys = points.map(p => p.y);
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const span = Math.max(1e-6, yMax - yMin);
+  const pad = Math.max(0.5, Math.min(2.5, span * 0.15));
+
+  // 7) Gráfica
   const ctx = document.getElementById('chart').getContext('2d');
   new Chart(ctx, {
     type: 'line',
     data: {
       datasets: [{
         label: 'Temperatura (ºC)',
-        data,
-        tension: 0.2,
+        data: points,
+        parsing: false,            // ya pasamos {x,y}
+        borderWidth: 2,
         pointRadius: 0,
-        spanGaps: true
+        tension: 0.2
       }]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      parsing: false, // usamos {x,y}
+      animation: false,
       scales: {
         x: {
           type: 'time',
-          time: {
-            unit: 'hour',
-            tooltipFormat: 'yyyy-MM-dd HH:mm'
-          },
+          time: { tooltipFormat: "dd/MM/yyyy HH:mm", displayFormats: { hour: "HH:mm" } },
           ticks: { color: '#a9c2de' },
           title: { display: true, text: 'Fecha y hora' }
         },
         y: {
+          suggestedMin: Math.floor((yMin - pad)*10)/10,
+          suggestedMax: Math.ceil((yMax + pad)*10)/10,
           ticks: { color: '#a9c2de' },
           title: { display: true, text: 'ºC' }
         }
       },
       plugins: {
-        legend: { labels: { color: '#cfe6ff' } }
+        legend: { labels: { color: '#cfe6ff' } },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => ` ${ctx.parsed.y.toFixed(1)} ºC`
+          }
+        }
       }
     }
   });
 
+  // 8) Mensaje final
+  msg.className = 'muted';
+  msg.textContent = `Cargadas ${points.length} muestras.`;
 })();
 </script>
 </body>
