@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import csv, io, os, re
+import csv, io, os, re, json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import requests
@@ -200,6 +200,34 @@ def write_merged(path: str, new_rows):
                 "AEMET_ult24h"
             ])
 
+def write_last_update(path_json="data/last_update.json", path_csv="data/last_update.csv", n_rows=None):
+    """
+    Genera dos ficheros ligeros con la marca temporal de la última captura:
+      - JSON para que la web (index.html) pueda mostrar un badge de “última actualización”
+      - CSV paralelo por si quieres consultarlo en Excel/R/etc.
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_local = now_utc.astimezone(TZ_LOCAL)
+
+    meta = {
+        "updated_utc": now_utc.isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "updated_local": now_local.isoformat(timespec="seconds"),
+        "tz_local": "Europe/Madrid",
+    }
+    if n_rows is not None:
+        meta["rows_last_run"] = int(n_rows)
+
+    # JSON para la web
+    os.makedirs(os.path.dirname(path_json), exist_ok=True)
+    with open(path_json, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+
+    # CSV paralelo (opcional)
+    with open(path_csv, "w", encoding="utf-8") as f:
+        f.write("updated_local,updated_utc,tz_local,rows_last_run\n")
+        f.write(f"{meta['updated_local']},{meta['updated_utc']},{meta['tz_local']},{meta.get('rows_last_run','')}\n")
+
+
 def main():
     os.makedirs("data", exist_ok=True)
     html = fetch_html()
@@ -207,6 +235,7 @@ def main():
     if not rows: rows = parse_table(html)
     if not rows: raise SystemExit("No pude extraer filas.")
     write_merged(OUT, rows)
+    write_last_update(n_rows=len(rows))
     print(f"OK: {len(rows)} registros. CSV -> {OUT}")
 
 if __name__ == "__main__":
