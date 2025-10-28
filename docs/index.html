@@ -64,21 +64,29 @@
   }
 
   function parseCSV(text){
-    const lines=text.trim().split(/\r?\n/);
-    if(lines.length<2) return [];
-    const headers=lines[0].split(',');
-    const iDate=headers.indexOf('datetime_utc');
-    const iTemp=headers.indexOf('temp_c');
-    if(iDate===-1||iTemp===-1) throw new Error("Cabeceras no válidas");
-    const pts=[];
-    for(let i=1;i<lines.length;i++){
-      const cols=lines[i].split(',');
-      const d=new Date(cols[iDate].trim());
-      const y=parseFloat(cols[iTemp]);
-      if(!isNaN(d)&&!isNaN(y)) pts.push({x:d,y});
-    }
-    return pts;
+  const lines = text.trim().split(/\r?\n/);
+  if(lines.length < 2) return [];
+  const headers = lines[0].split(',');
+  const iDate = headers.indexOf('datetime_utc');
+  const iTemp = headers.indexOf('temp_c');
+  if(iDate === -1 || iTemp === -1) throw new Error("Cabeceras no válidas");
+
+  const pts = [];
+  for(let i=1;i<lines.length;i++){
+    const cols = lines[i].split(',');
+    const dateStr = cols[iDate]?.trim();
+    const tempStr = cols[iTemp]?.trim();
+    if(!dateStr || !tempStr) continue;
+
+    // convertir a timestamp en milisegundos UTC
+    const d = new Date(dateStr);
+    if(isNaN(d)) continue;
+    const x = d.getTime();
+    const y = parseFloat(tempStr);
+    if(!isNaN(x) && !isNaN(y)) pts.push({x, y});
   }
+  return pts;
+}
 
   let points=[];
   try{
